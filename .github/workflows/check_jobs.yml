@@ -27,13 +27,13 @@ jobs:
         python check_jobs.py
 
     - name: Upload results
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: python_jobs_results
         path: remote_companies_with_python_jobs_cached.xlsx
 
     - name: Upload cache
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: job_cache
         path: cache.json
