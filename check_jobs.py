@@ -1,10 +1,10 @@
-import requests
 import pandas as pd
+import os
+import json
+import time
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import os
-import time
-import json
+import requests
 
 # ---------------- 配置 ----------------
 KEYWORDS = ["python", "data analyst", "data analysis", "data scientist"]
@@ -13,16 +13,13 @@ CACHE_FILE = "cache.json"
 MAX_WORKERS = 10
 BATCH_DELAY = 1
 
-# ---------------- 1. 拉取公司名单 ----------------
-url = "https://raw.githubusercontent.com/remoteintech/remote-jobs/main/data/companies.json"
-response = requests.get(url)
-data = response.json()
-df = pd.DataFrame(data)
+# ---------------- 1. 读取本地公司名单 ----------------
+df = pd.read_excel("companies.xlsx")
 df.columns = df.columns.str.lower()
 
 # 筛选 region = worldwide
 df = df[df["Region"] == "worldwide"].reset_index(drop=True)
-print(f"✅ 筛选出 {len(df)} 家 面向 worldwide 招聘公司")
+print(f" 筛选出 {len(df)} 家 worldwide 公司")
 
 # ---------------- 2. 加载缓存 ----------------
 if os.path.exists(CACHE_FILE):
@@ -31,7 +28,7 @@ if os.path.exists(CACHE_FILE):
 else:
     cache = {}
 
-# ---------------- 3. 检查 Careers 页面 ----------------
+# ---------------- 3. 检查招聘页面 ----------------
 def check_careers(website):
     if not website or not website.startswith("http"):
         return None
@@ -48,7 +45,7 @@ def check_careers(website):
             pass
     return None
 
-# ---------------- 4. 抓取匹配岗位 ----------------
+# ---------------- 4. 抓取岗位 ----------------
 def find_python_jobs(career_url):
     matched_jobs = []
     if not career_url:
@@ -117,4 +114,4 @@ df.to_excel(output_file, index=False)
 with open(CACHE_FILE, "w", encoding="utf-8") as f:
     json.dump(cache, f, indent=2, ensure_ascii=False)
 
-print(f"✅ 检查完成，结果保存为 {output_file}")
+print(f"结果保存为 {output_file}")
