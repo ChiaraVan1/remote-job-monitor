@@ -4,13 +4,13 @@ on:
   pull_request:
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"  # 每天 UTC 00:00（北京 08:00）运行
+    - cron: "0 0 * * *"   # 每天 UTC 00:00 运行（北京 08:00）
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # ✅ 允许发布到 Pages
+      contents: write      # ✅ 允许发布到 gh-pages
 
     steps:
       - name: Checkout repository
@@ -27,23 +27,108 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+
       - name: Run job checker
         run: python check_jobs.py
 
-      # 生成一个简单网页用于展示和下载结果
-      - name: Prepare site
+      # ------- 在线预览 + 可下载 页面生成 -------
+      - name: Render HTML pages and prepare downloads
         run: |
+          set -e
           mkdir -p site
-          cp -f remote_companies_with_python_jobs_cached.xlsx site/ || true
-          cp -f companies.xlsx site/ || true
-          echo '<h1>Data Analyst Jobs Results</h1><ul>' > site/index.html
-          [ -f site/companies.xlsx ] && echo '<li><a href="companies.xlsx">Download companies.xlsx</a></li>' >> site/index.html
-          [ -f site/remote_companies_with_python_jobs_cached.xlsx ] && echo '<li><a href="remote_companies_with_python_jobs_cached.xlsx">Download job results</a></li>' >> site/index.html
-          echo '</ul><p>Generated at $(date -u)</p>' >> site/index.html
 
-      # 发布到 GitHub Pages
+          # 拷贝原始 Excel 供下载（不存在也不报错）
+          cp -f companies.xlsx site/ 2>/dev/null || true
+          cp -f remote_companies_with_python_jobs_cached.xlsx site/ 2>/dev/null || true
+
+          python - <<'PY'
+          import pandas as pd, pathlib, datetime, os, html
+
+          site = pathlib.Path("site")
+          def to_table_html(xlsx):
+            if not os.path.exists(xlsx):
+              return "<p><em>No data file generated.</em></p>"
+            df = pd.read_excel(xlsx)
+            return df.to_html(index=False, escape=False)
+
+          def build_page(title, table_html, downloads, out_name):
+            now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+            dlinks = " · ".join(
+              f'<a href="{html.escape(href)}" download>{html.escape(text)}</a>'
+              for text, href in downloads if os.path.exists(href)
+            ) or "<em>No downloadable file.</em>"
+
+            html_doc = f"""<!doctype html>
+            <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1">
+              <title>{html.escape(title)}</title>
+              <link rel="stylesheet" href="https://cdn.datatables.net/2.0.7/css/dataTables.dataTables.min.css">
+              <style>
+                body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px}}
+                h1{{margin:0 0 8px}}
+                .meta{{color:#666;margin:4px 0 16px}}
+                .downloads{{margin:8px 0 16px}}
+                table{{width:100%}}
+              </style>
+            </head>
+            <body>
+              <h1>{html.escape(title)}</h1>
+              <div class="meta">Generated at {now}</div>
+              <div class="downloads">{dlinks}</div>
+              <div id="wrap">{table_html}</div>
+              <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+              <script src="https://cdn.datatables.net/2.0.7/js/dataTables.min.js"></script>
+              <script>
+                const tbl = document.querySelector('table');
+                if (tbl) new DataTable(tbl, {{
+                  paging: true,
+                  searching: true,
+                  info: true,
+                  order: [],
+                  pageLength: 25
+                }});
+              </script>
+            </body>
+            </html>"""
+            (site / out_name).write_text(html_doc, encoding="utf-8")
+
+          # 首页：jobs 结果（在线可看 + 下载）
+          jobs_table = to_table_html("remote_companies_with_python_jobs_cached.xlsx")
+          build_page(
+            "Data Analyst Jobs Results",
+            jobs_table,
+            downloads=[
+              ("Download job results (.xlsx)", "remote_companies_with_python_jobs_cached.xlsx"),
+              ("Download companies (.xlsx)", "companies.xlsx"),
+            ],
+            out_name="index.html"
+          )
+
+          # 公司名单页面（在线可看 + 下载）
+          companies_table = to_table_html("companies.xlsx")
+          build_page(
+            "Remote-friendly Companies",
+            companies_table,
+            downloads=[("Download companies (.xlsx)", "companies.xlsx")],
+            out_name="companies.html"
+          )
+          PY
+
+      # ------- 发布到 GitHub Pages -------
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: site
+
+      # （可选）仍然保留 artifacts 归档
+      - name: Upload artifacts (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: outputs
+          path: |
+            companies.xlsx
+            remote_companies_with_python_jobs_cached.xlsx
+          if-no-files-found: ignore
