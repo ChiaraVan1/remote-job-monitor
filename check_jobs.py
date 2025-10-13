@@ -18,7 +18,7 @@ df = pd.read_excel("companies.xlsx")
 df.columns = df.columns.str.lower()
 
 # 筛选 region = worldwide
-df = df[df["Region"] == "worldwide"].reset_index(drop=True)
+df = df[df["region"] == "worldwide"].reset_index(drop=True)
 print(f" 筛选出 {len(df)} 家 worldwide 公司")
 
 # ---------------- 2. 加载缓存 ----------------
