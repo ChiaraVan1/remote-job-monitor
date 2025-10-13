@@ -16,7 +16,7 @@ After pulling the latest changes (including the PR you just merged), follow thes
    pip install -r requirements.txt
    ```
 3. **Prepare the company list:**
-   Ensure `companies.xlsx` is present and includes a `Region` column that lists `Worldwide` companies. The script normalizes column names to lower case, so `Region`, `region`, or `REGION` are all accepted.
+   Ensure `companies.xlsx` is present and includes a `Region` column. Rows containing `Worldwide` or `Global` (case-insensitive, even when combined with other regions such as `USA, Worldwide`) will be processed. The script normalizes column names to lower case, so `Region`, `region`, or `REGION` are all accepted.
 
 ## Running the Monitor
 

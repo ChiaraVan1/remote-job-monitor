@@ -15,11 +15,25 @@ BATCH_DELAY = 1
 
 # ---------------- 1. 读取本地公司名单 ----------------
 df = pd.read_excel("companies.xlsx")
-df.columns = df.columns.str.lower()
+df.columns = df.columns.str.strip().str.lower()
 
-# 筛选 region = worldwide
-df = df[df["region"] == "worldwide"].reset_index(drop=True)
-print(f" 筛选出 {len(df)} 家 worldwide 公司")
+if "region" not in df.columns:
+    raise ValueError("`companies.xlsx` 缺少 `region` 列，请确认表头名称。")
+
+df["region"] = df["region"].fillna("").astype(str).str.strip().str.lower()
+region_counts = df["region"].value_counts()
+
+# 筛选包含 worldwide/global 的记录
+remote_mask = df["region"].str.contains("worldwide", na=False) | df["region"].str.contains("global", na=False)
+filtered_df = df[remote_mask].reset_index(drop=True)
+
+if filtered_df.empty:
+    print(f"columns: {list(df.columns)}")
+    print("\nTop region values:\n", region_counts.head(30))
+    raise ValueError("没有找到包含 worldwide/global 的公司，请检查 companies.xlsx 中的 Region 列。")
+
+df = filtered_df
+print(f" 筛选出 {len(df)} 家 worldwide/global 公司")
 
 # ---------------- 2. 加载缓存 ----------------
 if os.path.exists(CACHE_FILE):
