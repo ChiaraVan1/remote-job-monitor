@@ -1,16 +1,16 @@
 name: Check Python Data Analyst Jobs
 
 on:
-  pull_request:
-  workflow_dispatch:
-  schedule:
-    - cron: "0 0 * * *"   # 每天 UTC 00:00 运行（北京 08:00）
+  pull_request:           # PR 提交/更新自动跑
+  workflow_dispatch:      # 手动触发
+  schedule:               # 定时跑（UTC 00:00；北京 08:00）
+    - cron: "0 0 * * *"
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write      # ✅ 允许发布到 gh-pages
+      contents: write      # 允许发布到 gh-pages
 
     steps:
       - name: Checkout repository
@@ -31,99 +31,149 @@ jobs:
       - name: Run job checker
         run: python check_jobs.py
 
-      # ------- 在线预览 + 可下载 页面生成 -------
-      - name: Render HTML pages and prepare downloads
+      # === 只展示有 Python data 岗位的公司，并把岗位渲染为可点击链接 ===
+      - name: Render HTML pages and prepare downloads (filtered)
         run: |
           set -e
           mkdir -p site
 
-          # 拷贝原始 Excel 供下载（不存在也不报错）
+          # 拷贝原始 Excel 供下载（不存在不报错）
           cp -f companies.xlsx site/ 2>/dev/null || true
           cp -f remote_companies_with_python_jobs_cached.xlsx site/ 2>/dev/null || true
 
           python - <<'PY'
-          import pandas as pd, pathlib, datetime, os, html
+          import pandas as pd, pathlib, datetime, os, re, html
 
           site = pathlib.Path("site")
-          def to_table_html(xlsx):
-            if not os.path.exists(xlsx):
-              return "<p><em>No data file generated.</em></p>"
-            df = pd.read_excel(xlsx)
-            return df.to_html(index=False, escape=False)
 
-          def build_page(title, table_html, downloads, out_name):
-            now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-            dlinks = " · ".join(
-              f'<a href="{html.escape(href)}" download>{html.escape(text)}</a>'
-              for text, href in downloads if os.path.exists(href)
-            ) or "<em>No downloadable file.</em>"
+          # --- 工具函数 ---
+          def anchor(href, text=None):
+            if not href: return ""
+            t = html.escape(text or href)
+            return f'<a href="{html.escape(href)}" target="_blank" rel="noopener">{t}</a>'
 
-            html_doc = f"""<!doctype html>
-            <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1">
-              <title>{html.escape(title)}</title>
-              <link rel="stylesheet" href="https://cdn.datatables.net/2.0.7/css/dataTables.dataTables.min.css">
-              <style>
-                body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px}}
-                h1{{margin:0 0 8px}}
-                .meta{{color:#666;margin:4px 0 16px}}
-                .downloads{{margin:8px 0 16px}}
-                table{{width:100%}}
-              </style>
-            </head>
-            <body>
-              <h1>{html.escape(title)}</h1>
-              <div class="meta">Generated at {now}</div>
-              <div class="downloads">{dlinks}</div>
-              <div id="wrap">{table_html}</div>
-              <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-              <script src="https://cdn.datatables.net/2.0.7/js/dataTables.min.js"></script>
-              <script>
-                const tbl = document.querySelector('table');
-                if (tbl) new DataTable(tbl, {{
-                  paging: true,
-                  searching: true,
-                  info: true,
-                  order: [],
-                  pageLength: 25
-                }});
-              </script>
-            </body>
-            </html>"""
-            (site / out_name).write_text(html_doc, encoding="utf-8")
+          def parse_job_items(x):
+            """
+            将 matched_jobs 列解析成链接列表。
+            典型元素: "data analyst (https://example.com/job/123)"；
+            也兼容只有 URL 的情况。
+            """
+            if pd.isna(x): return []
+            if isinstance(x, str):
+              # 处理像 "['xxx (url)', 'yyy (url)']" 这样的序列化字符串
+              items = re.findall(r"'([^']+)'|\"([^\"]+)\"", x)
+              items = [a or b for a,b in items] or [x]
+            elif isinstance(x, (list, tuple)):
+              items = list(x)
+            else:
+              return []
 
-          # 首页：jobs 结果（在线可看 + 下载）
-          jobs_table = to_table_html("remote_companies_with_python_jobs_cached.xlsx")
-          build_page(
-            "Data Analyst Jobs Results",
-            jobs_table,
-            downloads=[
-              ("Download job results (.xlsx)", "remote_companies_with_python_jobs_cached.xlsx"),
-              ("Download companies (.xlsx)", "companies.xlsx"),
-            ],
-            out_name="index.html"
-          )
+            links = []
+            for it in items:
+              if not isinstance(it, str):
+                it = str(it)
+              m = re.search(r"\((https?://[^\)]+)\)", it)
+              if m:
+                url = m.group(1)
+                text = re.sub(r"\s*\(https?://[^\)]*\)\s*$", "", it).strip()
+                links.append(anchor(url, text or "job link"))
+              else:
+                m2 = re.search(r"(https?://\S+)", it)
+                if m2: links.append(anchor(m2.group(1), "job link"))
+            return links
 
-          # 公司名单页面（在线可看 + 下载）
-          companies_table = to_table_html("companies.xlsx")
-          build_page(
-            "Remote-friendly Companies",
-            companies_table,
-            downloads=[("Download companies (.xlsx)", "companies.xlsx")],
-            out_name="companies.html"
-          )
+          JOB_XLSX = "remote_companies_with_python_jobs_cached.xlsx"
+          if not os.path.exists(JOB_XLSX):
+            (site / "index.html").write_text("<p>No job file generated.</p>", encoding="utf-8")
+            raise SystemExit(0)
+
+          df = pd.read_excel(JOB_XLSX)
+
+          # 只保留 has_python_data_analyst_job == True
+          if "has_python_data_analyst_job" in df.columns:
+            df = df[df["has_python_data_analyst_job"] == True].copy()
+          else:
+            df = df.iloc[0:0].copy()
+
+          # 生成展示列：company（公司名链接官网） | region | jobs（岗位链接们）
+          def build_company_cell(row):
+            name = str(row.get("name", "") or row.get("Name", "Company")).strip() or "Company"
+            site_url = str(row.get("website", "")).strip()
+            return anchor(site_url, name) if site_url else html.escape(name)
+
+          def build_jobs_cell(row):
+            links = parse_job_items(row.get("matched_jobs", None))
+            return "<br>".join(links) if links else ""
+
+          out = pd.DataFrame({
+            "company": df.apply(build_company_cell, axis=1),
+            "region": df.get("region", pd.Series([""]*len(df))),
+            "jobs": df.apply(build_jobs_cell, axis=1),
+          })
+
+          # 去掉没有可点 job 的行
+          out = out[out["jobs"] != ""]
+
+          # 首页 HTML
+          now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+          table_html = out.to_html(index=False, escape=False)
+          html_doc = f"""<!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Python Data Analyst Openings</title>
+            <link rel="stylesheet" href="https://cdn.datatables.net/2.0.7/css/dataTables.dataTables.min.css">
+            <style>
+              body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px}}
+              h1{{margin:0 0 8px}}
+              .meta{{color:#666;margin:4px 0 16px}}
+              .downloads a{{margin-right:12px}}
+              table{{width:100%}}
+            </style>
+          </head>
+          <body>
+            <h1>Python Data Analyst Openings</h1>
+            <div class="meta">Generated at {now}</div>
+            <div class="downloads">
+              <a href="remote_companies_with_python_jobs_cached.xlsx" download>Download job results (.xlsx)</a>
+              <a href="companies.xlsx" download>Download companies (.xlsx)</a>
+            </div>
+            {table_html}
+            <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
+            <script src="https://cdn.datatables.net/2.0.7/js/dataTables.min.js"></script>
+            <script>
+              const tbl = document.querySelector('table');
+              if (tbl) new DataTable(tbl, {{
+                paging: true,
+                searching: true,
+                info: true,
+                order: [],
+                pageLength: 25
+              }});
+            </script>
+          </body>
+          </html>"""
+          (site / "index.html").write_text(html_doc, encoding="utf-8")
+
+          # 公司页（可选）
+          if os.path.exists("companies.xlsx"):
+            companies = pd.read_excel("companies.xlsx")
+            comp_html = companies.to_html(index=False, escape=False)
+            html2 = f"""<!doctype html><meta charset="utf-8">
+            <h1>Remote-friendly Companies</h1>
+            <div><a href="companies.xlsx" download>Download companies (.xlsx)</a></div>
+            {comp_html}"""
+            (site / "companies.html").write_text(html2, encoding="utf-8")
           PY
 
-      # ------- 发布到 GitHub Pages -------
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: site
 
-      # （可选）仍然保留 artifacts 归档
+      # 可选：保留原始产物
       - name: Upload artifacts (optional)
         uses: actions/upload-artifact@v4
         with:
