@@ -12,6 +12,7 @@ CAREER_PATHS = ["/careers", "/jobs", "/join-us", "/join", "/recruitment"]
 CACHE_FILE = "cache.json"
 MAX_WORKERS = 10
 BATCH_DELAY = 1
+FILTERED_CSV_FILE = "python_data_jobs.csv"
 
 # ---------------- 1. 读取本地公司名单 ----------------
 df = pd.read_excel("companies.xlsx")
@@ -124,6 +125,13 @@ df["has_python_data_analyst_job"] = [r["has_python_data_analyst_job"] for idx, r
 # ---------------- 7. 保存结果 ----------------
 output_file = "remote_companies_with_python_jobs_cached.xlsx"
 df.to_excel(output_file, index=False)
+
+filtered_jobs = df[df["has_python_data_analyst_job"]].copy()
+if not filtered_jobs.empty:
+    filtered_jobs.to_csv(FILTERED_CSV_FILE, index=False)
+    print(f"筛选出的岗位另存为 {FILTERED_CSV_FILE}，可直接在 GitHub 上预览。")
+else:
+    print("未找到匹配的岗位，未生成额外的 CSV 文件。")
 
 with open(CACHE_FILE, "w", encoding="utf-8") as f:
     json.dump(cache, f, indent=2, ensure_ascii=False)
